@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>献立カレンダー</title>
+<meta name="description" content="日ごとの献立と、材料の分量・手順。">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+<meta name="googlebot" content="noindex, nofollow">
+<meta name="bingbot" content="noindex, nofollow">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🍚</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'media',
+  theme: {
+    extend: {
+      colors: {
+        ground:  { light: '#e9edec', dark: '#0e1413' },
+        surface: { light: '#ffffff', dark: '#171f1e' },
+        sunken:  { light: '#dfe5e3', dark: '#121a19' },
+        hair:    { light: '#c8d2cf', dark: '#2b3836' },
+        ink:     { light: '#131b1a', dark: '#e4eae8' },
+        muted:   { light: '#5c6a67', dark: '#93a29e' },
+        ai:      { light: '#1f4e6b', dark: '#79b2d4' },
+        aisoft:  { light: '#e2ecf2', dark: '#17303e' },
+      },
+      fontFamily: {
+        sans:  ['"Hiragino Sans"', '"Noto Sans JP"', '"Yu Gothic"', 'system-ui', 'sans-serif'],
+        mincho:['"Hiragino Mincho ProN"', '"Yu Mincho"', 'serif'],
+      },
+    },
+  },
+};
+</script>
+<style type="text/tailwindcss">
+  @layer base {
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      @apply bg-ground-light text-ink-light dark:bg-ground-dark dark:text-ink-dark
+             font-sans text-[15px] leading-relaxed m-0;
+    }
+    :focus-visible { @apply outline-2 outline-offset-2 outline-ai-light dark:outline-ai-dark; }
+  }
+  @layer components {
+    .card   { @apply bg-surface-light dark:bg-surface-dark border border-hair-light dark:border-hair-dark rounded-[3px]; }
+    .btn    { @apply card px-3 py-1 cursor-pointer hover:bg-sunken-light dark:hover:bg-sunken-dark; }
+    .tag    { @apply text-[.62rem] leading-5 px-1 rounded-[2px] font-bold
+                     bg-aisoft-light text-ai-light dark:bg-aisoft-dark dark:text-ai-dark; }
+    .tnum   { font-variant-numeric: tabular-nums; }
+  }
+</style>
+</head>
+<body>
+<div class="mx-auto max-w-4xl px-4 pt-7 pb-16 flex flex-col gap-5">
+
+  <div class="flex items-center gap-3 flex-wrap">
+    <h1 class="font-mincho text-2xl font-semibold m-0">献立カレンダー</h1>
+    <div class="ml-auto flex items-center gap-1.5">
+      <button id="prev" class="btn" aria-label="前の月">&lsaquo;</button>
+      <span id="label" class="tnum font-semibold min-w-[7.5rem] text-center"></span>
+      <button id="next" class="btn" aria-label="次の月">&rsaquo;</button>
+      <button id="tdy" class="btn">今日</button>
+    </div>
+  </div>
+
+  <div class="card overflow-hidden">
+    <div class="grid grid-cols-7 bg-sunken-light dark:bg-sunken-dark text-[.72rem] tracking-wider
+                text-muted-light dark:text-muted-dark font-bold text-center">
+      <span class="py-1.5 text-[#8a3b2e] dark:text-[#e08b7c]">日</span>
+      <span class="py-1.5">月</span><span class="py-1.5">火</span><span class="py-1.5">水</span>
+      <span class="py-1.5">木</span><span class="py-1.5">金</span>
+      <span class="py-1.5 text-ai-light dark:text-ai-dark">土</span>
+    </div>
+    <div id="grid" class="grid grid-cols-7"></div>
+  </div>
+
+  <div id="detail" class="card overflow-hidden"></div>
+
+  <footer class="text-[.76rem] text-muted-light dark:text-muted-dark text-center leading-7">
+    成分値は日本食品標準成分表（八訂）増補2023年。分量はすべて<strong>可食部の g</strong>。<br>
+    栄養計算と出典は非公開のリポジトリで管理している。ここは献立と手順だけ。
+  </footer>
+</div>
+
+<script>
+const CELL = 'min-h-[5rem] border-t border-r border-hair-light dark:border-hair-dark ' +
+             'p-1.5 flex flex-col gap-0.5 text-left items-stretch min-w-0 ' +
+             '[&:nth-child(7n)]:border-r-0';
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+};
+const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                 String(d.getDate()).padStart(2, '0');
+const TODAY = iso(new Date());
+
+let byDate = {}, dates = [], cur = { y: 0, m: 0 }, selected = null;
+
+function renderCal() {
+  document.getElementById('label').textContent = cur.y + '年' + cur.m + '月';
+  const first = new Date(cur.y, cur.m - 1, 1);
+  const last = new Date(cur.y, cur.m, 0).getDate();
+  const grid = document.getElementById('grid');
+  grid.textContent = '';
+
+  for (let i = 0; i < first.getDay(); i++) {
+    grid.appendChild(el('div', CELL + ' bg-sunken-light dark:bg-sunken-dark'));
+  }
+  for (let d = 1; d <= last; d++) {
+    const key = cur.y + '-' + String(cur.m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    const day = byDate[key];
+    const cell = el(day ? 'button' : 'div', CELL +
+      (day ? ' cursor-pointer hover:bg-aisoft-light dark:hover:bg-aisoft-dark' : '') +
+      (key === selected ? ' bg-aisoft-light dark:bg-aisoft-dark ring-2 ring-inset ring-ai-light dark:ring-ai-dark' : ''));
+    if (day) cell.type = 'button';
+
+    const num = el('span', 'tnum text-[.85rem] font-semibold ' +
+      (day ? 'text-ink-light dark:text-ink-dark' : 'text-muted-light dark:text-muted-dark') +
+      (key === TODAY ? ' bg-ai-light dark:bg-ai-dark text-surface-light dark:text-surface-dark ' +
+                       'rounded-full w-6 h-6 inline-flex items-center justify-center' : ''), d);
+    cell.appendChild(num);
+
+    if (day) {
+      const main = day.meals.find(m => m.slot === '夜') || day.meals[0];
+      if (main) {
+        cell.appendChild(el('div',
+          'text-[.68rem] text-muted-light dark:text-muted-dark truncate min-w-0 max-sm:hidden',
+          main.title));
+      }
+      cell.addEventListener('click', () => { selected = key; renderCal(); renderDetail(); });
+    }
+    grid.appendChild(cell);
+  }
+}
+
+function renderDetail() {
+  const box = document.getElementById('detail');
+  box.textContent = '';
+  const day = byDate[selected];
+  if (!day) {
+    box.appendChild(el('div', 'py-10 px-4 text-center text-muted-light dark:text-muted-dark',
+      'この日の献立はありません'));
+    return;
+  }
+
+  const head = el('div', 'flex flex-wrap items-baseline gap-2 px-4 pt-4 pb-2');
+  head.appendChild(el('span', 'font-mincho text-xl font-semibold tnum',
+    day.date + '（' + day.weekday + '）'));
+  box.appendChild(head);
+
+  day.meals.forEach(m => {
+    const sec = el('div', 'border-t border-hair-light dark:border-hair-dark px-4 pt-3 pb-4');
+    sec.appendChild(el('p', 'text-[.7rem] tracking-widest font-bold m-0 mb-1 ' +
+      'text-muted-light dark:text-muted-dark', m.slot));
+    sec.appendChild(el('p', 'font-semibold m-0 mb-2', m.title || '—'));
+
+    if (m.rows.length) {
+      const wrap = el('div', 'overflow-x-auto');
+      const tb = el('table', 'w-full border-collapse text-[.88rem]');
+      m.rows.forEach(r => {
+        const tr = el('tr');
+        tr.appendChild(el('td', 'py-0.5 border-b border-dotted border-hair-light ' +
+          'dark:border-hair-dark align-baseline', r.name));
+        tr.appendChild(el('td', 'py-0.5 border-b border-dotted border-hair-light ' +
+          'dark:border-hair-dark align-baseline text-right tnum whitespace-nowrap pl-3 w-px',
+          r.amount));
+        tb.appendChild(tr);
+      });
+      wrap.appendChild(tb);
+      sec.appendChild(wrap);
+    }
+    if (m.steps.length) {
+      const ol = el('ol', 'list-decimal ml-5 mt-2 text-[.88rem] space-y-0.5');
+      m.steps.forEach(s => ol.appendChild(el('li', null, s)));
+      sec.appendChild(ol);
+    }
+    box.appendChild(sec);
+  });
+}
+
+function pick() {
+  const upcoming = dates.filter(d => d >= TODAY);
+  return upcoming.length ? upcoming[0] : (dates.length ? dates[dates.length - 1] : null);
+}
+
+fetch('data.json')
+  .then(r => {
+    if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+    return r.json();
+  })
+  .then(json => {
+    byDate = Object.fromEntries(json.days.map(d => [d.date, d]));
+    dates = json.days.map(d => d.date).sort();
+    selected = byDate[TODAY] ? TODAY : pick();
+    const base = selected || TODAY;
+    const [y, m] = base.split('-').map(Number);
+    cur = { y, m };
+    renderCal();
+    renderDetail();
+  })
+  .catch(e => {
+    document.getElementById('detail').appendChild(
+      el('div', 'py-10 px-4 text-center text-muted-light dark:text-muted-dark',
+         '献立データを読み込めませんでした（' + e.message + '）'));
+  });
+
+document.getElementById('prev').addEventListener('click', () => {
+  cur.m--; if (cur.m < 1) { cur.m = 12; cur.y--; } renderCal();
+});
+document.getElementById('next').addEventListener('click', () => {
+  cur.m++; if (cur.m > 12) { cur.m = 1; cur.y++; } renderCal();
+});
+document.getElementById('tdy').addEventListener('click', () => {
+  const d = new Date();
+  cur = { y: d.getFullYear(), m: d.getMonth() + 1 };
+  if (byDate[TODAY]) selected = TODAY;
+  renderCal(); renderDetail();
+});
+</script>
+</body>
+</html>
